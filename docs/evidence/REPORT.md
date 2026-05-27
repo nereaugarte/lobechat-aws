@@ -7,8 +7,8 @@
 | Student name | Nerea Ugarte |
 | ESADE email | nerea.ugarte@alumni.esade.edu |
 | GitHub repo URL | https://github.com/nereaugarte/lobechat-aws (private; user `joseporiolrius` invited as collaborator) |
-| Latest commit SHA | dd8f7d4de2d5852c9c0660afa3f31773c0eebe69 |
-| Final tag | TODO (`final-vX.Y.Z`) |
+| Latest commit SHA | e0a87e349d2d8364e675bd05d5af99499e941fb7 |
+| Final tag | final-v1.0.0 |
 
 ## 2. Public URL
 
