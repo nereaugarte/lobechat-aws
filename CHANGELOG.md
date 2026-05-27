@@ -1,19 +1,78 @@
-## v0.6.0 (2026-05-04)
-
-### Feat
-
-- **db**: flyway versioned migrations with secret-templated baseline
-- **mcp**: add linux-sandbox MCP server with persistent zellij shell
-- **vllm**: bump max-model-len 16384 → 32768
-- **mcp**: register five new MCP servers in MCPHub
-- **stack**: add Qdrant + Hayhooks vector RAG services
-- **vllm**: switch to Gemma 4 E4B-it with native function calling
-- **db**: add dbmate migration system with schema and seed support
-- **lobechat**: use OpenRouter for embeddings
+## v5.0.1 (2026-01-30)
 
 ### Fix
 
-- **lobechat**: suppress changelog modal and update-check redirect
+- use shell for PostgreSQL setup and add timing to docs
+
+## v5.0.0 (2026-01-29)
+
+### Feat
+
+- replace UserData with Ansible playbook for application deployment
+- add CloudFormation infrastructure and deploy workflow
+
+### Fix
+
+- add bun to PATH and improve installation success message
+
+### Refactor
+
+- simplify v3.x for manual CloudFormation deployment
+
+## v2.4.0 (2026-01-29)
+
+### Refactor
+
+- reorganize docs folder structure
+
+## v2.3.0 (2026-01-29)
+
+## v2.2.0 (2026-01-29)
+
+## v2.1.3 (2026-01-29)
+
+### Refactor
+
+- remove v1.x docs and rewrite CLAUDE.md for v2.x
+
+## v2.1.2 (2026-01-29)
+
+## v2.1.1 (2026-01-29)
+
+## v2.1.0 (2026-01-29)
+
+## v2.0.2 (2026-01-29)
+
+### Fix
+
+- **ci**: remove frozen-lockfile flag
+
+## v2.0.1 (2026-01-29)
+
+### Fix
+
+- **ci**: remove cache config that fails before clone
+
+## v2.0.0 (2026-01-29)
+
+## v1.0.4 (2026-01-29)
+
+## v1.0.3 (2026-01-29)
+
+## v1.0.2 (2026-01-29)
+
+## v1.0.1 (2026-01-29)
+
+## v1.0.0 (2026-01-29)
+
+### Feat
+
+- **db**: add dbmate migration system with schema and seed support
+- **lobechat**: use OpenRouter for embeddings
+
+### Refactor
+
+- remove Docker stack, keep EC2 deployment only
 
 ## v0.5.2 (2026-01-27)
 

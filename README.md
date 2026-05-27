@@ -1,161 +1,124 @@
-# LobeChat Local Stack
+# LobeChat AWS - Infrastructure as Code
 
-Self-hosted LobeChat backed by PostgreSQL + Casdoor SSO + MinIO, plus a local RAG stack (**Qdrant** + **Hayhooks**), local LLM inference (**vLLM** running **Gemma 4 E4B** with native function calling), and an **MCPHub** aggregator that exposes ~10 MCP servers (ssh-exec, notion, qdrant, haystack, infrastructure-diagrams, d2, playwright, filesystem, minio, aws-*) to any chat agent.
+Deploy **LobeChat to AWS** using CloudFormation and Ansible.
 
-## Quick Start
+---
 
-```bash
-docker compose up -d
-```
+> **IMPORTANT: DELETE YOUR STACK WHEN NOT IN USE**
+>
+> The EC2 instance costs **~$0.35/hour** (~$8.40/day). Always delete your stack when you're done to avoid unnecessary charges on your sandbox budget.
+>
+> ```bash
+> # Delete all resources
+> aws cloudformation delete-stack --stack-name lobechat
+>
+> # Verify deletion
+> aws cloudformation wait stack-delete-complete --stack-name lobechat
+> ```
+>
+> **Do not leave the stack running overnight!**
+
+---
 
 ## Architecture
 
-See [docs/architecture.drawio](docs/architecture.drawio) for visual diagram.
+![Architecture](docs/images/architecture.png)
 
-```
-User --> LobeChat (:47000)
-              |
-              +--> Casdoor (:47002)  --> PostgreSQL (casdoor db)
-              |
-              +--> MinIO (:47005)    --> ./data/minio
-              |
-              +--> PostgreSQL        --> ./data/postgres
-              |    (lobechat db)
-              |
-              +--> MCPHub (:47008) --> {ssh-exec, notion, qdrant, haystack, ...}
-              |
-              +--> vLLM (:47007)   --> Gemma 4 E4B (local, function calling)
-              |
-              +--> Qdrant (:47010) --> ./data/qdrant   (vector DB)
-              |
-              +--> Hayhooks (:47012)        --> Haystack pipelines REST
-                   Hayhooks MCP (:47013)    --> Haystack pipelines as MCP
-```
+See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for details.
 
-## Services
+---
 
-| Service | Container | Port | Description |
-|---------|-----------|------|-------------|
-| LobeChat | lobe-chat | 47000 | Main application |
-| Casdoor | casdoor | 47002 | SSO authentication |
-| MinIO S3 | minio | 47005 | Object storage API |
-| MinIO Console | minio | 47006 | Storage admin UI |
-| vLLM | vllm | 47007 | Local LLM (gemma-4-E4B-it, MCP tool calling) |
-| MCPHub | mcphub | 47008 | MCP server hub |
-| Qdrant REST | qdrant | 47010 | Vector DB HTTP API |
-| Qdrant gRPC | qdrant | 47011 | Vector DB gRPC |
-| Hayhooks | hayhooks | 47012 | Haystack pipelines REST |
-| Hayhooks MCP | hayhooks-mcp | 47013 | Haystack as MCP server |
-| PostgreSQL | shared-postgres | 47003 | Database |
+## Quick Start
 
-## Access
+### Prerequisites
 
-| Service | URL |
-|---------|-----|
-| LobeChat | http://localhost:47000 |
-| Casdoor Admin | http://localhost:47002 |
-| MinIO Console | http://localhost:47006 |
-| vLLM API | http://localhost:47007/v1 |
-| MCPHub | http://localhost:47008 |
-| Qdrant Dashboard | http://localhost:47010/dashboard |
-| Hayhooks API | http://localhost:47012 |
-| Hayhooks Swagger | http://localhost:47012/docs |
-| Hayhooks ReDoc | http://localhost:47012/redoc |
-| Hayhooks MCP | http://localhost:47013/mcp |
+- AWS account (ESADE Innovation Sandbox)
+- AWS CLI installed
+- [uv](https://docs.astral.sh/uv/) installed (`curl -LsSf https://astral.sh/uv/install.sh | sh`)
 
-## Credentials
-
-| Service | Username | Password |
-|---------|----------|----------|
-| LobeChat | user | pswd123 |
-| Casdoor Admin | admin | pswd123 |
-| MinIO | minioadmin | minioadmin |
-| MCPHub | admin | admin123 |
-| PostgreSQL | postgres | postgres |
-| vLLM | API key: `sk-local` (no username) | |
-| Qdrant | none (open on local network) | |
-| Hayhooks | none (open on local network) | |
-
-vLLM model (OpenAI-compatible, API key `sk-local`):
-- `google/gemma-4-E4B-it` at `http://localhost:47007/v1` (Gemma 4, native function calling for MCP)
-
-## Commands
+### Deploy
 
 ```bash
-docker compose up -d          # Start
-docker compose down           # Stop
-docker compose logs -f        # All logs
-docker compose logs -f lobe-chat  # LobeChat logs
-docker compose restart lobe-chat  # Restart service
+# 1. Set AWS credentials
+export AWS_ACCESS_KEY_ID="..."
+export AWS_SECRET_ACCESS_KEY="..."
+export AWS_SESSION_TOKEN="..."
+export AWS_REGION="eu-west-1"
+
+# 2. Create SSH key pair
+aws ec2 create-key-pair --key-name lobechat-key \
+  --query 'KeyMaterial' --output text > ~/.ssh/lobechat-key.pem
+chmod 400 ~/.ssh/lobechat-key.pem
+
+# 3. Deploy infrastructure (CloudFormation)
+aws cloudformation deploy \
+  --template-file infra/cloudformation.yml \
+  --stack-name lobechat \
+  --capabilities CAPABILITY_IAM
+
+# 4. Get public IP and create inventory
+PUBLIC_IP=$(aws cloudformation describe-stacks --stack-name lobechat \
+  --query 'Stacks[0].Outputs[?OutputKey==`PublicIP`].OutputValue' --output text)
+sed "s/<PUBLIC_IP>/$PUBLIC_IP/" ansible/inventory.yml.template > ansible/inventory.yml
+
+# 5. Deploy application (Ansible)
+uv run ansible-playbook -i ansible/inventory.yml ansible/playbook.yml
 ```
 
-## Project Structure
+### Access
 
-```
-.
-├── docker-compose.yml         # Stack definition
-├── .env                       # Environment variables (gitignored)
-├── dockerfiles/
-│   └── mcphub.Dockerfile      # mcphub image extended with graphviz, docker.io, gcc
-├── config/
-│   ├── casdoor-app.conf       # Casdoor server config
-│   ├── init_data.json         # Casdoor initial data
-│   ├── init-postgres.sql      # Database init script
-│   ├── mcp_settings.json      # MCPHub server registry (source of truth)
-│   ├── mcp_settings.json.bak  # Backup
-│   └── ssh/                   # mcphub SSH key for ssh-exec MCP (gitignored)
-├── db/
-│   ├── migrate                # dbmate wrapper script
-│   ├── migrations/            # Incremental SQL migrations
-│   ├── schema.sql             # Schema snapshot
-│   └── seed.sql               # Seed data
-├── patches/
-│   └── route.js               # LobeChat hotfix for MCP session retry logic
-├── data/                      # gitignored
-│   ├── postgres/              # PostgreSQL data
-│   ├── minio/                 # Uploaded files
-│   ├── qdrant/                # Qdrant vector storage
-│   ├── huggingface/           # vLLM model cache
-│   └── mcphub/                # MCPHub runtime data
-└── docs/
-    ├── architecture.drawio    # Architecture diagram
-    ├── rag-demo/              # Haystack + Qdrant RAG use case
-    ├── mcp-onboarding.md      # How to register a new MCP server
-    ├── mcp-d2.md              # Agent guide: d2 MCP
-    ├── mcp-diagrams.md        # Agent guide: infrastructure-diagrams MCP
-    ├── lobechat-assistants.md # How to seed LobeChat agents from outside the UI
-    ├── agent-cloud-diagrams.md# Cloud Diagram Assistant agent
-    └── agent-rag-sage.md      # RAG Sage agent
+After Ansible completes, access LobeChat at `http://<PUBLIC_IP>:3210`
+
+---
+
+## Destroy
+
+**Always delete the stack when you're done:**
+
+```bash
+aws cloudformation delete-stack --stack-name lobechat
 ```
 
-## Adding new MCP servers
+### Cost Reference
 
-End-to-end process for registering a new MCP in MCPHub and exposing it to LobeChat: see [`docs/mcp-onboarding.md`](docs/mcp-onboarding.md).
+| Resource | Cost |
+|----------|------|
+| EC2 c7a.2xlarge | ~$0.35/hour (~$8.40/day) |
+| EBS 20GB gp3 | ~$1.60/month |
 
-Per-server agent guides (when to use, role prompt, sample prompts):
-- [`docs/mcp-d2.md`](docs/mcp-d2.md) — D2 diagram language (logical / abstract diagrams)
-- [`docs/mcp-diagrams.md`](docs/mcp-diagrams.md) — `diagrams` + Graphviz (cloud topology w/ vendor icons)
+---
 
-Pre-built LobeChat agents:
-- [`docs/agent-cloud-diagrams.md`](docs/agent-cloud-diagrams.md) — Cloud Diagram Assistant 🏗️ (renders + uploads PNG to MinIO + embeds inline)
-- [`docs/agent-rag-sage.md`](docs/agent-rag-sage.md) — RAG Sage 📚 (dynamic-discovery RAG over the local corpus, returns markdown artifact)
+## Documentation
 
-How to create / update / delete LobeChat agents from outside the UI (DB recipe used by the entries above):
-- [`docs/lobechat-assistants.md`](docs/lobechat-assistants.md)
+| Document | Description |
+|----------|-------------|
+| [HOMEWORK.md](docs/HOMEWORK.md) | Step-by-step deployment guide for students |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | Infrastructure architecture details |
 
-## Configuration
+---
 
-Edit `.env` for:
-- `KEY_VAULTS_SECRET`, `NEXT_AUTH_SECRET` — LobeChat secrets, min 32 chars (base64 for `KEY_VAULTS_SECRET`)
-- `AUTH_CASDOOR_*` — SSO settings (id + secret match `config/init_data.json`)
-- `POSTGRES_PASSWORD` — shared Postgres password
-- `S3_*`, `MINIO_ROOT_USER`, `MINIO_ROOT_PASSWORD` — MinIO storage
-- `HF_TOKEN` — Hugging Face token, used by vLLM to fetch gated Gemma 4 weights
-- `OPENROUTER_API_KEY` — external LLM + embedding provider (also used as `OPENAI_API_KEY` for embeddings)
-- `OPENAPI_MCP_HEADERS` — Notion bearer token for `notion-mcp`. Format: `{"Authorization":"Bearer ntn_…","Notion-Version":"2022-06-28"}`
-- `VLLM_MODEL_ID` — defaults to `google/gemma-4-E4B-it`
-- `MCPHUB_ADMIN_USER`, `MCPHUB_ADMIN_PASSWORD` — MCPHub admin login
-- `SSH_HOST`, `SSH_USERNAME`, `SSH_ALLOWED_COMMANDS`, … — `ssh-exec` MCP whitelist
-- AWS credentials are auto-mounted from `~/.aws` into `mcphub` (no `.env` entry needed)
+## Infrastructure
 
-Anthropic models (`claude-sonnet-4-6`, `claude-opus-4-7`, …) are wired via the [Meridian](https://github.com/rynfar/meridian) bridge running outside this compose stack. The provider is registered directly in the `ai_providers` Postgres table (encrypted `key_vaults` blob via `KEY_VAULTS_SECRET`); see `docs/lobechat-assistants.md` for the encryption recipe.
+| Resource | Description |
+|----------|-------------|
+| VPC | 10.0.0.0/16 |
+| Public Subnet | 10.0.1.0/24 |
+| Security Group | Ports 22, 3210, 9000, 9001 |
+| EC2 Instance | c7a.2xlarge, Ubuntu 24.04 |
+
+### Services (deployed via Ansible)
+
+- PostgreSQL 16 with pgvector
+- MinIO (S3-compatible storage)
+- LobeChat (Next.js application)
+
+---
+
+## Branches
+
+| Branch | Purpose |
+|--------|---------|
+| `v1.x` | Manual EC2 deployment guide |
+| `v2.x` | GitHub Actions CI/CD practice |
+| `v3.x` | CloudFormation with UserData |
+| `v5.x` | CloudFormation + Ansible (this branch) |

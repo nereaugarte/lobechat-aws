@@ -1,7 +1,7 @@
 {
   "mcpServers": {
     "ssh-exec": {
-      "enabled": true,
+      "enabled": false,
       "owner": "admin",
       "command": "uvx",
       "args": [

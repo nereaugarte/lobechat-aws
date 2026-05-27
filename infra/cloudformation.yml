@@ -1,0 +1,191 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: LobeChat Infrastructure - VPC and EC2 instance (configured via Ansible)
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: c7a.2xlarge
+    Description: EC2 instance type (needs 8 vCPU, 16GB RAM for build)
+    AllowedValues:
+      - c7a.2xlarge
+      - c7a.xlarge
+      - t3.2xlarge
+      - m7a.2xlarge
+
+  KeyPairName:
+    Type: String
+    Default: lobechat-key
+    Description: Name of the SSH key pair for EC2 access
+
+  VolumeSize:
+    Type: Number
+    Default: 20
+    Description: EBS volume size in GB
+    MinValue: 20
+    MaxValue: 100
+
+Mappings:
+  RegionAMI:
+    eu-west-1:
+      AMI: ami-03446a3af42c5e74e  # Ubuntu 24.04 LTS (2025-12)
+    us-east-1:
+      AMI: ami-0c7217cdde317cfec  # Ubuntu 24.04 LTS
+    us-west-2:
+      AMI: ami-0cf2b4e024cdb6960  # Ubuntu 24.04 LTS
+
+Resources:
+  # VPC and Networking
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags:
+        - Key: Name
+          Value: lobechat-vpc
+
+  InternetGateway:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: lobechat-igw
+
+  VPCGatewayAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref InternetGateway
+
+  PublicSubnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [1, !GetAZs '']
+      MapPublicIpOnLaunch: true
+      Tags:
+        - Key: Name
+          Value: lobechat-public-subnet
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+      Tags:
+        - Key: Name
+          Value: lobechat-rtb
+
+  PublicRoute:
+    Type: AWS::EC2::Route
+    DependsOn: VPCGatewayAttachment
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref InternetGateway
+
+  SubnetRouteTableAssociation:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref PublicSubnet
+      RouteTableId: !Ref RouteTable
+
+  # Security Group
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupName: lobechat-sg
+      GroupDescription: LobeChat security group - SSH, LobeChat, MinIO
+      VpcId: !Ref VPC
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 22
+          ToPort: 22
+          CidrIp: 0.0.0.0/0
+          Description: SSH access
+        - IpProtocol: tcp
+          FromPort: 3210
+          ToPort: 3210
+          CidrIp: 0.0.0.0/0
+          Description: LobeChat web interface
+        - IpProtocol: tcp
+          FromPort: 9000
+          ToPort: 9000
+          CidrIp: 0.0.0.0/0
+          Description: MinIO S3 API
+        - IpProtocol: tcp
+          FromPort: 9001
+          ToPort: 9001
+          CidrIp: 0.0.0.0/0
+          Description: MinIO Console
+      Tags:
+        - Key: Name
+          Value: lobechat-sg
+
+  # EC2 Instance
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref InstanceType
+      ImageId: !FindInMap [RegionAMI, !Ref 'AWS::Region', AMI]
+      KeyName: !Ref KeyPairName
+      SubnetId: !Ref PublicSubnet
+      SecurityGroupIds:
+        - !Ref SecurityGroup
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: !Ref VolumeSize
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: Name
+          Value: lobechat-server
+
+Outputs:
+  VPCId:
+    Description: VPC ID
+    Value: !Ref VPC
+    Export:
+      Name: !Sub '${AWS::StackName}-VPCId'
+
+  PublicSubnetId:
+    Description: Public Subnet ID
+    Value: !Ref PublicSubnet
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicSubnetId'
+
+  SecurityGroupId:
+    Description: Security Group ID
+    Value: !Ref SecurityGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-SecurityGroupId'
+
+  InstanceId:
+    Description: EC2 Instance ID
+    Value: !Ref EC2Instance
+    Export:
+      Name: !Sub '${AWS::StackName}-InstanceId'
+
+  PublicIP:
+    Description: Public IP address of the EC2 instance
+    Value: !GetAtt EC2Instance.PublicIp
+    Export:
+      Name: !Sub '${AWS::StackName}-PublicIP'
+
+  LobeChatURL:
+    Description: LobeChat application URL (after Ansible deployment)
+    Value: !Sub 'http://${EC2Instance.PublicIp}:3210'
+
+  MinIOConsoleURL:
+    Description: MinIO Console URL (after Ansible deployment)
+    Value: !Sub 'http://${EC2Instance.PublicIp}:9001'
+
+  SSHCommand:
+    Description: SSH command to connect to the instance
+    Value: !Sub 'ssh -i ~/.ssh/${KeyPairName}.pem ubuntu@${EC2Instance.PublicIp}'
+
+  AnsibleCommand:
+    Description: Command to run Ansible playbook
+    Value: !Sub 'uv run ansible-playbook -i ansible/inventory.yml ansible/playbook.yml'

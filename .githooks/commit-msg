@@ -4,7 +4,7 @@
 # https://commitizen-tools.github.io/commitizen/
 #
 # This hook validates commit messages against the conventional commits spec.
-# Run `cz commit` for interactive commit creation.
+# Run `uv run cz commit` for interactive commit creation.
 #
 
 commit_msg_file="$1"
