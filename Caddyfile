@@ -1,0 +1,66 @@
+# Caddyfile for LobeChat HTTPS deployment
+# Automatically obtains Let's Encrypt certificate for sslip.io domain
+
+{
+    # Global options
+    email noreply@example.com
+    # Use Let's Encrypt staging for testing, switch to production when ready
+    # acme_ca https://acme-staging-v02.api.letsencrypt.org/directory
+}
+
+108.130.141.156.sslip.io {
+    # Route Casdoor-specific paths to Casdoor
+    handle /.well-known/* {
+        reverse_proxy localhost:47002
+    }
+
+    handle /static/* {
+        reverse_proxy localhost:47002
+    }
+
+    handle /login/* {
+        reverse_proxy localhost:47002
+    }
+
+    handle /callback {
+        reverse_proxy localhost:47002
+    }
+
+    handle /api/get-* {
+        reverse_proxy localhost:47002
+    }
+
+    handle /api/login* {
+        reverse_proxy localhost:47002
+    }
+
+    handle /swagger/* {
+        reverse_proxy localhost:47002
+    }
+
+    handle /.casbin/* {
+        reverse_proxy localhost:47002
+    }
+
+    # Route all other paths to LobeChat
+    handle {
+        reverse_proxy localhost:47000 {
+        # WebSocket support for streaming
+            header_up Host {host}
+            header_up X-Real-IP {remote}
+            header_up X-Forwarded-For {remote}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+
+    # Enable large file uploads (for MinIO integration)
+    request_body {
+        max_size 100MB
+    }
+
+    # Logging
+    log {
+        output file /var/log/caddy/access.log
+        format json
+    }
+}

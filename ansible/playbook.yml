@@ -312,6 +312,7 @@
         cmd: bun run db:migrate
         chdir: "{{ lobechat_dir }}"
       changed_when: false
+      when: false
 
     - name: Create LobeChat systemd service
       ansible.builtin.copy:

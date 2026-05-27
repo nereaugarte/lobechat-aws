@@ -1,0 +1,100 @@
+# Minimal production docker-compose for EC2 deployment
+# LobeChat without SSO (Casdoor), using OpenRouter for LLM
+
+services:
+  lobe-chat:
+    image: lobehub/lobe-chat-database
+    container_name: lobe-chat
+    ports:
+      - "${LOBECHAT_PORT:-47000}:3210"
+    environment:
+      # App configuration - HTTPS URL
+      - APP_URL=https://${HOST_DOMAIN}
+      # Database configuration
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/lobechat
+      # NextAuth configuration (no SSO)
+      - NEXT_AUTH_SECRET=${NEXT_AUTH_SECRET}
+      - AUTH_URL=https://${HOST_DOMAIN}
+      - AUTH_TRUST_HOST=true
+      # S3 Storage configuration
+      - S3_ENDPOINT=http://minio:9000
+      - S3_BUCKET=${S3_BUCKET:-lobe}
+      - S3_PUBLIC_DOMAIN=http://minio:9000
+      - S3_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - S3_ENABLE_PATH_STYLE=1
+      - S3_SET_ACL=0
+      # Key Vaults Secret
+      - KEY_VAULTS_SECRET=${KEY_VAULTS_SECRET}
+      # OpenRouter integration
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - ENABLED_OPENROUTER=1
+      # OpenRouter as OpenAI-compatible endpoint
+      - OPENAI_API_KEY=${OPENROUTER_API_KEY}
+      - OPENAI_PROXY_URL=https://openrouter.ai/api/v1
+      # Embedding model configuration
+      - DEFAULT_FILES_CONFIG=embedding_model=openai/text-embedding-3-small
+      - LLM_VISION_IMAGE_USE_BASE64=1
+      # Suppress changelog modal
+      - FEATURE_FLAGS=-changelog,-check_updates
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "${QDRANT_PORT:-47010}:6333"
+      - "${QDRANT_GRPC_PORT:-47011}:6334"
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "${MINIO_PORT:-47005}:9000"
+      - "${MINIO_CONSOLE_PORT:-47006}:9001"
+    volumes:
+      - ./data/minio:/data
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_API_CORS_ALLOW_ORIGIN=https://${HOST_DOMAIN}
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: shared-postgres
+    ports:
+      - "${POSTGRES_PORT:-47003}:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_INITDB_ARGS=-E UTF8 --locale=C
+      - POSTGRES_DB=lobechat
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    shm_size: 128mb

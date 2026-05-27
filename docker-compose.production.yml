@@ -1,0 +1,175 @@
+# Production docker-compose for EC2 deployment
+# Simplified stack without vLLM (using OpenRouter instead)
+
+services:
+  casdoor:
+    image: casbin/casdoor:v2.13.0
+    container_name: casdoor
+    ports:
+      - "${CASDOOR_PORT:-47002}:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - RUNNING_IN_DOCKER=true
+      - driverName=postgres
+      - dataSourceName=user=postgres password=${POSTGRES_PASSWORD:-postgres} host=postgres port=5432 sslmode=disable dbname=casdoor
+    volumes:
+      - ./config/init_data.json:/init_data.json:ro
+      - ./config/casdoor-app.conf:/conf/app.conf:ro
+    command: /bin/sh -c './server --createDatabase=true'
+    restart: unless-stopped
+
+  lobe-chat:
+    image: lobehub/lobe-chat-database
+    container_name: lobe-chat
+    ports:
+      - "${LOBECHAT_PORT:-47000}:3210"
+    volumes:
+      - ./patches/route.js:/app/.next/server/app/(backend)/trpc/tools/[trpc]/route.js:ro
+    environment:
+      # App configuration - HTTPS URL
+      - APP_URL=https://${HOST_DOMAIN}
+      # Database configuration
+      - DATABASE_URL=postgresql://postgres:${POSTGRES_PASSWORD:-postgres}@postgres:5432/lobechat
+      # NextAuth SSO configuration
+      - NEXT_AUTH_SSO_PROVIDERS=casdoor
+      - NEXT_AUTH_SECRET=${NEXT_AUTH_SECRET}
+      - NEXTAUTH_URL=https://${HOST_DOMAIN}
+      - AUTH_URL=https://${HOST_DOMAIN}
+      # Casdoor configuration - use public URL from .env
+      - AUTH_CASDOOR_ISSUER=${AUTH_CASDOOR_ISSUER}
+      - AUTH_CASDOOR_ID=${AUTH_CASDOOR_ID}
+      - AUTH_CASDOOR_SECRET=${AUTH_CASDOOR_SECRET}
+      # Trust custom hostname for NextAuth
+      - AUTH_TRUST_HOST=true
+      # S3 Storage configuration - internal Docker network
+      - S3_ENDPOINT=http://minio:9000
+      - S3_BUCKET=${S3_BUCKET:-lobe}
+      - S3_PUBLIC_DOMAIN=http://minio:9000
+      - S3_ACCESS_KEY_ID=${MINIO_ROOT_USER:-minioadmin}
+      - S3_SECRET_ACCESS_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - S3_ENABLE_PATH_STYLE=1
+      - S3_SET_ACL=0
+      # Key Vaults Secret
+      - KEY_VAULTS_SECRET=${KEY_VAULTS_SECRET}
+      # OpenRouter integration
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - ENABLED_OPENROUTER=1
+      # OpenRouter as OpenAI-compatible endpoint (for embeddings)
+      - OPENAI_API_KEY=${OPENROUTER_API_KEY}
+      - OPENAI_PROXY_URL=https://openrouter.ai/api/v1
+      # Embedding model configuration
+      - DEFAULT_FILES_CONFIG=embedding_model=openai/text-embedding-3-small
+      - LLM_VISION_IMAGE_USE_BASE64=1
+      # Suppress changelog modal
+      - FEATURE_FLAGS=-changelog,-check_updates
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      casdoor:
+        condition: service_started
+      minio:
+        condition: service_healthy
+
+  mcphub:
+    build:
+      context: .
+      dockerfile: dockerfiles/mcphub.Dockerfile
+    image: lobechat-aws-mcphub:latest
+    container_name: mcphub
+    ports:
+      - "${MCPHUB_PORT:-47008}:3000"
+    environment:
+      - AWS_REGION=${AWS_REGION:-eu-west-1}
+      - AWS_DEFAULT_REGION=${AWS_DEFAULT_REGION:-eu-west-1}
+      - OPENAPI_MCP_HEADERS=${OPENAPI_MCP_HEADERS:-{}}
+    volumes:
+      - ./config/mcp_settings.json:/app/mcp_settings.json
+      - ./data/mcphub:/app/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    restart: unless-stopped
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    ports:
+      - "${QDRANT_PORT:-47010}:6333"
+      - "${QDRANT_GRPC_PORT:-47011}:6334"
+    volumes:
+      - ./data/qdrant:/qdrant/storage
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+
+  hayhooks:
+    image: deepset/hayhooks:v1.1.0
+    container_name: hayhooks
+    ports:
+      - "${HAYHOOKS_PORT:-47012}:1416"
+    environment:
+      - HAYHOOKS_HOST=0.0.0.0
+      - HAYHOOKS_PORT=1416
+      - QDRANT_URL=http://qdrant:6333
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  hayhooks-mcp:
+    image: deepset/hayhooks:v1.1.0
+    container_name: hayhooks-mcp
+    ports:
+      - "${HAYHOOKS_MCP_PORT:-47013}:1417"
+    environment:
+      - QDRANT_URL=http://qdrant:6333
+    entrypoint: ["sh","-c"]
+    command: ["pip install --no-cache-dir 'hayhooks[mcp]==1.1.0' && exec hayhooks mcp run --host 0.0.0.0 --port 1417 --json-response"]
+    depends_on:
+      qdrant:
+        condition: service_healthy
+    restart: unless-stopped
+
+  minio:
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "${MINIO_PORT:-47005}:9000"
+      - "${MINIO_CONSOLE_PORT:-47006}:9001"
+    volumes:
+      - ./data/minio:/data
+    environment:
+      - MINIO_ROOT_USER=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_ROOT_PASSWORD=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_API_CORS_ALLOW_ORIGIN=https://${HOST_DOMAIN}
+    command: server /data --console-address ":9001"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres:
+    image: pgvector/pgvector:pg16
+    container_name: shared-postgres
+    ports:
+      - "${POSTGRES_PORT:-47003}:5432"
+    environment:
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - POSTGRES_INITDB_ARGS=-E UTF8 --locale=C
+    volumes:
+      - ./data/postgres:/var/lib/postgresql/data
+      - ./config/init-postgres.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    shm_size: 128mb

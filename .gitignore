@@ -3,6 +3,8 @@ data/
 
 # Environment files with secrets
 .env
+db/flyway/.env.flyway
+db/flyway/.build/
 
 # AWS credentials and keys
 aws_credentials.yaml
@@ -21,3 +23,4 @@ uv.lock
 .idea/
 .vscode/
 *.swp
+.env.production
