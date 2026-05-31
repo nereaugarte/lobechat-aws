@@ -342,7 +342,7 @@
       "clientId": "a387a4892ee19b1a2249",
       "clientSecret": "dbf205949d704de81b0b5b3603174e23fbecc354",
       "redirectUris": [
-        "https://108.130.141.156.sslip.io/api/auth/callback/casdoor"
+        "https://54.217.113.13.sslip.io/api/auth/callback/casdoor"
       ],
       "forcedRedirectOrigin": "",
       "tokenFormat": "JWT",
@@ -368,7 +368,7 @@
       "formBackgroundUrlMobile": "",
       "failedSigninLimit": 5,
       "failedSigninFrozenTime": 15,
-      "origin": "https://108.130.141.156.sslip.io"
+      "origin": "https://54.217.113.13.sslip.io"
     },
     {
       "owner": "admin",
