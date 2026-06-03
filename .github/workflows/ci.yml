@@ -2,37 +2,89 @@ name: CI
 
 on:
   push:
-    branches: [v5.x]
   pull_request:
-    branches: [v5.x]
+  workflow_dispatch:
+
+# tests/ contains live-stack integration tests (imports openai/httpx, hits vLLM /health and other
+# running endpoints) — cannot run in build-free CI.
+# Do NOT add: docker build, docker compose up/run, or pytest.
 
 jobs:
-  validate:
-    name: Validate Infrastructure
+  static-analysis:
+    name: Static Analysis
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout (full history)
         uses: actions/checkout@v4
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
         with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-session-token: ${{ secrets.AWS_SESSION_TOKEN }}
-          aws-region: eu-west-1
+          fetch-depth: 0  # full history; default shallow clone makes gitleaks and cz check --rev-range fail or scan nothing
 
-      - name: Validate CloudFormation template
+      # ── 1. Hadolint ──────────────────────────────────────────────────────────
+      - name: hadolint — sandbox.Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: dockerfiles/sandbox.Dockerfile
+        continue-on-error: true  # warn-only: findings expected (e.g. unpinned :latest installs)
+
+      - name: hadolint — mcphub.Dockerfile
+        uses: hadolint/hadolint-action@v3.1.0
+        with:
+          dockerfile: dockerfiles/mcphub.Dockerfile
+        continue-on-error: true  # warn-only: findings expected (FROM samanhappy/mcphub:latest)
+
+      # ── 2. Docker Compose config (schema + interpolation only) ────────────────
+      - name: docker compose config
         run: |
-          aws cloudformation validate-template \
-            --template-body file://infra/cloudformation.yml
+          # Safe: .env.example contains only placeholder values; real .env is excluded by .gitignore
+          cp .env.example .env
+          # AUTH_CASDOOR_ISSUER has no default in compose and is absent from .env.example — supply a dummy
+          echo "AUTH_CASDOOR_ISSUER=http://localhost:47002" >> .env
+          docker compose -f docker-compose.production.yml config -q
 
+      # ── 3. yamllint ──────────────────────────────────────────────────────────
+      - name: Install yamllint
+        run: pip install yamllint
+
+      - name: yamllint
+        run: |
+          yamllint docker-compose.production.yml
+          yamllint .github/workflows/ci.yml
+
+      # ── 4. actionlint ────────────────────────────────────────────────────────
+      - name: actionlint
+        uses: rhysd/actionlint@v1.7.7
+
+      # ── 5. Gitleaks — secret scan over git history ───────────────────────────
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2.3.9
+        continue-on-error: true  # warn-only: surfaces any accidental secret commits without blocking
+
+      # ── 6. Trivy — fs (vulnerability/dependency) + config (misconfiguration) ─
+      - name: trivy fs scan
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: table
+          exit-code: '0'
+        continue-on-error: true  # warn-only: dependency findings expected
+
+      - name: trivy config scan
+        uses: aquasecurity/trivy-action@0.31.0
+        with:
+          scan-type: config
+          scan-ref: .
+          format: table
+          exit-code: '0'
+        continue-on-error: true  # warn-only: misconfiguration findings expected (unpinned images, USER root, etc.)
+
+      # ── 7. Commitizen — Conventional Commits check ───────────────────────────
       - name: Install uv
-        uses: astral-sh/setup-uv@v5
+        uses: astral-sh/setup-uv@v6.3.1
 
-      - name: Lint Ansible playbook
+      - name: commitizen check
         run: |
-          uv tool install ansible-lint
-          ~/.local/share/uv/tools/ansible-lint/bin/ansible-galaxy collection install community.general
-          uv tool run ansible-lint ansible/playbook.yml
+          # Mirrors .githooks/commit-msg local gate; bounded to new commits only to avoid
+          # failing on pre-existing non-conventional history in this repo
+          uv run cz check --rev-range origin/main..HEAD
