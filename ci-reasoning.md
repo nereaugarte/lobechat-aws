@@ -2,10 +2,10 @@
 
 ## Evidence
 
-[placeholder — I will embed the screenshot here after the Actions run]
+![CI Actions run — all gates green](docs/evidence/ci/actions-run.png)
 
-Actions run URL: [TO BE FILLED]
-Commit SHA: [TO BE FILLED]
+Actions run URL: https://github.com/nereaugarte/lobechat-aws/actions/runs/26870409511
+Commit SHA: 579abed
 
 ---
 
