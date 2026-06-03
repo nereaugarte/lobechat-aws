@@ -1,0 +1,12 @@
+extends: default
+
+rules:
+  line-length:
+    max: 200          # compose files legitimately have long env-var lines
+    level: warning
+  document-start:
+    present: false    # docker-compose files conventionally omit the --- marker
+  commas:
+    max-spaces-before: 0
+    min-spaces-after: 1
+    max-spaces-after: -1  # allow flow sequences like ["sh","-c"] without enforcing spaces

@@ -13,6 +13,9 @@ jobs:
   static-analysis:
     name: Static Analysis
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash
 
     steps:
       - name: Checkout (full history)
@@ -38,7 +41,7 @@ jobs:
         run: |
           # Safe: .env.example contains only placeholder values; real .env is excluded by .gitignore
           cp .env.example .env
-          # AUTH_CASDOOR_ISSUER has no default in compose and is absent from .env.example — supply a dummy
+          # AUTH_CASDOOR_ISSUER has no default in compose and is absent from .env.example - supply a dummy
           echo "AUTH_CASDOOR_ISSUER=http://localhost:47002" >> .env
           docker compose -f docker-compose.production.yml config -q
 
@@ -48,8 +51,8 @@ jobs:
 
       - name: yamllint
         run: |
-          yamllint docker-compose.production.yml
-          yamllint .github/workflows/ci.yml
+          yamllint -c .yamllint.yml docker-compose.production.yml
+          yamllint -c .yamllint.yml .github/workflows/ci.yml
 
       # ── 4. actionlint ────────────────────────────────────────────────────────
       - name: actionlint
@@ -85,6 +88,6 @@ jobs:
 
       - name: commitizen check
         run: |
-          # Mirrors .githooks/commit-msg local gate; bounded to new commits only to avoid
+          # Mirrors .githooks/commit-msg local gate - bounded to new commits only to avoid
           # failing on pre-existing non-conventional history in this repo
           uv run cz check --rev-range origin/main..HEAD
