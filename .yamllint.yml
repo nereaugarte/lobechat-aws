@@ -8,5 +8,5 @@ rules:
     present: false    # docker-compose files conventionally omit the --- marker
   commas:
     max-spaces-before: 0
-    min-spaces-after: 1
-    max-spaces-after: -1  # allow flow sequences like ["sh","-c"] without enforcing spaces
+    min-spaces-after: 0   # allow ["sh","-c"] style flow sequences with no space after comma
+    max-spaces-after: -1
