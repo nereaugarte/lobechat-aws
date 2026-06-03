@@ -10,3 +10,6 @@ rules:
     max-spaces-before: 0
     min-spaces-after: 0   # allow ["sh","-c"] style flow sequences with no space after comma
     max-spaces-after: -1
+  truthy:
+    allowed-values: ['true', 'false', 'on', 'off', 'yes', 'no']
+    check-keys: false     # suppress [truthy] warning on the `on:` trigger key in ci.yml

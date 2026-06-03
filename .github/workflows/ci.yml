@@ -57,8 +57,6 @@ jobs:
       # ── 4. actionlint ────────────────────────────────────────────────────────
       - name: actionlint
         uses: rhysd/actionlint@v1.7.7
-        with:
-          shellcheck: ""  # disable shellcheck integration to avoid false positives on run: blocks
 
       # ── 5. Gitleaks — secret scan over git history ───────────────────────────
       - name: gitleaks
